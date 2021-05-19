@@ -609,7 +609,7 @@ NULL
             "encoding:%s serializedlength:%zu "
             "lru:%d lru_seconds_idle:%llu%s",
             (void*)val, val->refcount,
-            strenc, rdbSavedObjectLen(val, c->argv[2]),
+            strenc, rdbSavedObjectLen(val, c->argv[2], c->db->id),
             val->lru, estimateObjectIdleTime(val)/1000, extra);
     } else if (!strcasecmp(c->argv[1]->ptr,"sdslen") && c->argc == 3) {
         dictEntry *de;

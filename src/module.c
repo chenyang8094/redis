@@ -4998,7 +4998,7 @@ void *RM_LoadDataTypeFromString(const RedisModuleString *str, const moduleType *
     void *ret;
 
     rioInitWithBuffer(&payload, str->ptr);
-    moduleInitIOContext(io,(moduleType *)mt,&payload,NULL);
+    moduleInitIOContext(io,(moduleType *)mt,&payload,NULL,-1);
 
     /* All RM_Save*() calls always write a version 2 compatible format, so we
      * need to make sure we read the same.
@@ -5024,7 +5024,7 @@ RedisModuleString *RM_SaveDataTypeToString(RedisModuleCtx *ctx, void *data, cons
     RedisModuleIO io;
 
     rioInitWithBuffer(&payload,sdsempty());
-    moduleInitIOContext(io,(moduleType *)mt,&payload,NULL);
+    moduleInitIOContext(io,(moduleType *)mt,&payload,NULL,-1);
     mt->rdb_save(&io,data);
     if (io.ctx) {
         moduleFreeContext(io.ctx);
@@ -5119,6 +5119,13 @@ const RedisModuleString *RM_GetKeyNameFromIO(RedisModuleIO *io) {
 /* Returns a RedisModuleString with the name of the key from RedisModuleKey. */
 const RedisModuleString *RM_GetKeyNameFromModuleKey(RedisModuleKey *key) {
     return key ? key->key : NULL;
+}
+
+/* Returns the DB currently saving or loading. There is no guarantee
+ * that the dbid is always available (For example, in the aux_save/aux_load 
+ * callbacks, etc.), so this may return -1. */
+int RM_GetDbFromIO(RedisModuleIO *io) {
+    return io->dbid;
 }
 
 /* --------------------------------------------------------------------------
@@ -9356,6 +9363,7 @@ void moduleRegisterCoreAPI(void) {
     REGISTER_API(GetContextFromIO);
     REGISTER_API(GetKeyNameFromIO);
     REGISTER_API(GetKeyNameFromModuleKey);
+    REGISTER_API(GetDbFromIO);
     REGISTER_API(BlockClient);
     REGISTER_API(UnblockClient);
     REGISTER_API(IsBlockedReplyRequest);
