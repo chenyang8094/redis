@@ -1464,6 +1464,36 @@ void propagateExpire(redisDb *db, robj *key, int lazy) {
     decrRefCount(argv[1]);
 }
 
+/* Propagate hexpires into slaves and the AOF file.
+ * When a field expires in the master, a HDEL operation for this field is sent
+ * to all the slaves and the AOF file if enabled.
+ *
+ * This way the key expiry is centralized in one place, and since both
+ * AOF and the master->slave link guarantee operation ordering, everything
+ * will be consistent even if we allow write operations against expiring
+ * fields. */
+void propagateHashExpire(redisDb *db, robj *key, robj *field) {
+    robj *argv[3];
+
+    argv[0] = shared.hdel;
+    argv[1] = key;
+    argv[2] = field;
+    incrRefCount(argv[0]);
+    incrRefCount(argv[1]);
+    incrRefCount(argv[2]);
+
+    /* If the master decided to expire a hash field we must propagate it to replicas no matter what..
+     * Even if module executed a command without asking for propagation. */
+    int prev_replication_allowed = server.replication_allowed;
+    server.replication_allowed = 1;
+    propagate(server.hdelCommand,db->id,argv,3,PROPAGATE_AOF|PROPAGATE_REPL);
+    server.replication_allowed = prev_replication_allowed;
+
+    decrRefCount(argv[0]);
+    decrRefCount(argv[1]);
+    decrRefCount(argv[2]);
+}
+
 /* Check if the key is expired. */
 int keyIsExpired(redisDb *db, robj *key) {
     mstime_t when = getExpire(db,key);

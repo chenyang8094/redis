@@ -64,7 +64,7 @@ int hashTypeGetFromZiplist(robj *o, sds field,
 
     serverAssert(o->encoding == OBJ_ENCODING_ZIPLIST);
 
-    zl = o->ptr;
+    zl = HASH_EW_GET_PTR(o);
     fptr = ziplistIndex(zl, ZIPLIST_HEAD);
     if (fptr != NULL) {
         fptr = ziplistFind(zl, fptr, (unsigned char*)field, sdslen(field), 1);
@@ -92,7 +92,7 @@ sds hashTypeGetFromHashTable(robj *o, sds field) {
 
     serverAssert(o->encoding == OBJ_ENCODING_HT);
 
-    de = dictFind(o->ptr, field);
+    de = dictFind(HASH_EW_GET_PTR(o), field);
     if (de == NULL) return NULL;
     return dictGetVal(de);
 }
@@ -205,7 +205,7 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
     if (o->encoding == OBJ_ENCODING_ZIPLIST) {
         unsigned char *zl, *fptr, *vptr;
 
-        zl = o->ptr;
+        zl = HASH_EW_GET_PTR(o);
         fptr = ziplistIndex(zl, ZIPLIST_HEAD);
         if (fptr != NULL) {
             fptr = ziplistFind(zl, fptr, (unsigned char*)field, sdslen(field), 1);
@@ -228,13 +228,13 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
             zl = ziplistPush(zl, (unsigned char*)value, sdslen(value),
                     ZIPLIST_TAIL);
         }
-        o->ptr = zl;
+        HASH_EW_GET_PTR(o) = zl;
 
         /* Check if the ziplist needs to be converted to a hash table */
         if (hashTypeLength(o) > server.hash_max_ziplist_entries)
             hashTypeConvert(o, OBJ_ENCODING_HT);
     } else if (o->encoding == OBJ_ENCODING_HT) {
-        dictEntry *de = dictFind(o->ptr,field);
+        dictEntry *de = dictFind(HASH_EW_GET_PTR(o),field);
         if (de) {
             sdsfree(dictGetVal(de));
             if (flags & HASH_SET_TAKE_VALUE) {
@@ -258,7 +258,7 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
             } else {
                 v = sdsdup(value);
             }
-            dictAdd(o->ptr,f,v);
+            dictAdd(HASH_EW_GET_PTR(o),f,v);
         }
     } else {
         serverPanic("Unknown hash encoding");
@@ -279,23 +279,23 @@ int hashTypeDelete(robj *o, sds field) {
     if (o->encoding == OBJ_ENCODING_ZIPLIST) {
         unsigned char *zl, *fptr;
 
-        zl = o->ptr;
+        zl = HASH_EW_GET_PTR(o);
         fptr = ziplistIndex(zl, ZIPLIST_HEAD);
         if (fptr != NULL) {
             fptr = ziplistFind(zl, fptr, (unsigned char*)field, sdslen(field), 1);
             if (fptr != NULL) {
                 zl = ziplistDelete(zl,&fptr); /* Delete the key. */
                 zl = ziplistDelete(zl,&fptr); /* Delete the value. */
-                o->ptr = zl;
+                HASH_EW_GET_PTR(o) = zl;
                 deleted = 1;
             }
         }
     } else if (o->encoding == OBJ_ENCODING_HT) {
-        if (dictDelete((dict*)o->ptr, field) == C_OK) {
+        if (dictDelete((dict*)HASH_EW_GET_PTR(o), field) == C_OK) {
             deleted = 1;
 
             /* Always check if the dictionary needs a resize after a delete. */
-            if (htNeedsResize(o->ptr)) dictResize(o->ptr);
+            if (htNeedsResize(HASH_EW_GET_PTR(o))) dictResize(HASH_EW_GET_PTR(o));
         }
 
     } else {
@@ -309,9 +309,9 @@ unsigned long hashTypeLength(const robj *o) {
     unsigned long length = ULONG_MAX;
 
     if (o->encoding == OBJ_ENCODING_ZIPLIST) {
-        length = ziplistLen(o->ptr) / 2;
+        length = ziplistLen(HASH_EW_GET_PTR(o)) / 2;
     } else if (o->encoding == OBJ_ENCODING_HT) {
-        length = dictSize((const dict*)o->ptr);
+        length = dictSize((const dict*)HASH_EW_GET_PTR(o));
     } else {
         serverPanic("Unknown hash encoding");
     }
@@ -478,14 +478,14 @@ void hashTypeConvertZiplist(robj *o, int enc) {
             ret = dictAdd(dict, key, value);
             if (ret != DICT_OK) {
                 serverLogHexDump(LL_WARNING,"ziplist with dup elements dump",
-                    o->ptr,ziplistBlobLen(o->ptr));
+                    HASH_EW_GET_PTR(o),ziplistBlobLen(HASH_EW_GET_PTR(o)));
                 serverPanic("Ziplist corruption detected");
             }
         }
         hashTypeReleaseIterator(hi);
-        zfree(o->ptr);
+        zfree(HASH_EW_GET_PTR(o));
         o->encoding = OBJ_ENCODING_HT;
-        o->ptr = dict;
+        HASH_EW_GET_PTR(o) = dict;
     } else {
         serverPanic("Unknown hash encoding");
     }
@@ -513,7 +513,7 @@ robj *hashTypeDup(robj *o) {
     serverAssert(o->type == OBJ_HASH);
 
     if(o->encoding == OBJ_ENCODING_ZIPLIST){
-        unsigned char *zl = o->ptr;
+        unsigned char *zl = HASH_EW_GET_PTR(o);
         size_t sz = ziplistBlobLen(zl);
         unsigned char *new_zl = zmalloc(sz);
         memcpy(new_zl, zl, sz);
@@ -521,7 +521,7 @@ robj *hashTypeDup(robj *o) {
         hobj->encoding = OBJ_ENCODING_ZIPLIST;
     } else if(o->encoding == OBJ_ENCODING_HT){
         dict *d = dictCreate(&hashDictType, NULL);
-        dictExpand(d, dictSize((const dict*)o->ptr));
+        dictExpand(d, dictSize((const dict*)HASH_EW_GET_PTR(o)));
 
         hi = hashTypeInitIterator(o);
         while (hashTypeNext(hi) != C_ERR) {
@@ -798,11 +798,103 @@ static void addHashFieldToReply(client *c, robj *o, sds field) {
     }
 }
 
+/* Return the expire time of the specified key, or -1 if no expire
+ * is associated with this key (i.e. the key is non volatile) */
+long long getHashExpire(dict *expires, robj *key) {
+    dictEntry *de;
+
+    /* No expire? return ASAP */
+    if (dictSize(expires) == 0 ||
+       (de = dictFind(expires,key->ptr)) == NULL) return -1;
+
+    return dictGetSignedIntegerVal(de);
+}
+
+/* Check if the key is expired. */
+int fieldIsExpired(dict *expires, robj *field) {
+    mstime_t when = getHashExpire(expires,field);
+    mstime_t now;
+
+    if (when < 0) return 0; /* No expire for this key */
+
+    /* Don't expire anything while loading. It will be done later. */
+    if (server.loading) return 0;
+
+    /* If we are in the context of a Lua script, we pretend that time is
+     * blocked to when the Lua script started. This way a key can expire
+     * only the first time it is accessed and not in the middle of the
+     * script execution, making propagation to slaves / AOF consistent.
+     * See issue #1525 on Github for more information. */
+    if (server.lua_caller) {
+        now = server.lua_time_snapshot;
+    }
+    /* If we are in the middle of a command execution, we still want to use
+     * a reference time that does not change: in that case we just use the
+     * cached time, that we update before each call in the call() function.
+     * This way we avoid that commands such as RPOPLPUSH or similar, that
+     * may re-open the same key multiple times, can invalidate an already
+     * open object in a next call, if the next call will see the key expired,
+     * while the first did not. */
+    else if (server.fixed_time_expire > 0) {
+        now = server.mstime;
+    }
+    /* For the other cases, we want to use the most fresh time we have. */
+    else {
+        now = mstime();
+    }
+
+    /* The key expired if the current (virtual or real) time is greater
+     * than the expire time of the key. */
+    return now > when;
+}
+
+int expireHashIfNeeded(redisDb *db, robj *o, robj *key, robj *field) {
+    if (!fieldIsExpired(HASH_EW_GET_EXPIRES(o),field)) return 0;
+
+    /* If we are running in the context of a slave, instead of
+     * evicting the expired field from the hash, we return ASAP:
+     * the slave key expiration is controlled by the master that will
+     * send us synthesized HDEL operations for expired fields.
+     *
+     * Still we try to return the right information to the caller,
+     * that is, 0 if we think the key should be still valid, 1 if
+     * we think the key is expired at this time. */
+    if (server.masterhost != NULL) return 1;
+
+    /* If clients are paused, we keep the current dataset constant,
+     * but return to the client what we believe is the right state. Typically,
+     * at the end of the pause we will properly expire the key OR we will
+     * have failed over and the new primary will send us the expire. */
+    if (checkClientPauseTimeoutAndReturnIfPaused()) return 1;
+
+    int deleted = 0, keyremoved = 0;
+    /* Delete the field */
+    if (hashTypeDelete(o,field->ptr)) {
+        deleted++;
+        if (hashTypeLength(o) == 0) {
+            dbDelete(db,key);
+            keyremoved = 1;
+        }
+    }
+    
+    // TODO
+    // server.stat_expiredkeys++; 
+    if (deleted || keyremoved) {
+        propagateHashExpire(db,key,field);
+        signalModifiedKey(NULL,db,key);
+    }
+    return 1;
+}
+
 void hgetCommand(client *c) {
     robj *o;
 
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.null[c->resp])) == NULL ||
         checkType(c,o,OBJ_HASH)) return;
+
+    if (expireHashIfNeeded(c->db, o, c->argv[1], c->argv[2])) {
+        addReplyNull(c);
+    }
 
     addHashFieldToReply(c, o, c->argv[2]->ptr);
 }
@@ -1201,4 +1293,63 @@ void hrandfieldCommand(client *c) {
 
     hashTypeRandomElement(hash,hashTypeLength(hash),&ele,NULL);
     hashReplyFromZiplistEntry(c, &ele);
+}
+
+static int hashCheckAlreadyExpired(long long when) {
+    /* EXPIRE with negative TTL, or EXPIREAT with a timestamp into the past
+     * should never be executed as a DEL when load the AOF or in the context
+     * of a slave instance.
+     *
+     * Instead we add the already expired key to the database with expire time
+     * (possibly in the past) and wait for an explicit DEL from the master. */
+    return (when <= mstime() && !server.loading && !server.masterhost);
+}
+
+static void hashExpireGenericCommand(client *c, long long basetime, int unit) {
+    robj *o;
+    long long when; /* unix time in milliseconds when the key will expire. */
+
+    if (getLongLongFromObjectOrReply(c, c->argv[3], &when, NULL) != C_OK)
+        return;
+
+    int negative_when = when < 0;
+    if (unit == UNIT_SECONDS) when *= 1000;
+    when += basetime;
+    if (((when < 0) && !negative_when) || ((when-basetime > 0) && negative_when)) {
+        addReplyErrorFormat(c, "invalid expire time in %s", c->cmd->name);
+        return;
+    }
+
+    if ((o = lookupKeyWriteOrReply(c,c->argv[1],shared.czero)) == NULL ||
+        checkType(c,o,OBJ_HASH)) return;
+
+    if (!hashTypeExists(o,c->argv[2]->ptr)) {
+        addReply(c,shared.czero);
+        return;
+    } 
+
+    if (hashCheckAlreadyExpired(when)) {
+
+        server.dirty++;
+    } else {
+        dictEntry *de = dictFind(HASH_EW_GET_EXPIRES(o),c->argv[2]->ptr);
+        if (de == NULL) {
+            /* Because of the ziplist encoding, it is not possible to share fields with the hash structure here. */
+            de = dictAddOrFind(HASH_EW_GET_EXPIRES(o),sdsdup(c->argv[2]->ptr));
+        }  
+        dictSetSignedIntegerVal(de,when);
+        server.dirty++;
+    }
+
+    addReply(c,shared.cone);
+}
+
+/* HEXPIRE key field seconds */
+void hexpireCommand(client *c) {
+    hashExpireGenericCommand(c,mstime(),UNIT_SECONDS);
+}
+
+/* HPEXPIRE key field milliseconds */
+void hpexpireCommand(client *c) {
+    hashExpireGenericCommand(c,mstime(),UNIT_MILLISECONDS);
 }

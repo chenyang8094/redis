@@ -1009,7 +1009,7 @@ struct sharedObjectsStruct {
     *script, *replconf, *eval, *persist, *set, *pexpireat, *pexpire, 
     *time, *pxat, *absttl, *retrycount, *force, *justid, 
     *lastid, *ping, *setid, *keepttl, *load, *createconsumer,
-    *getack, *special_asterick, *special_equals, *default_username, *redacted,
+    *getack, *special_asterick, *special_equals, *default_username, *redacted, *hdel,
     *select[PROTO_SHARED_SELECT_CMDS],
     *integers[OBJ_SHARED_INTEGERS],
     *mbulkhdr[OBJ_SHARED_BULKHDR_LEN], /* "*<value>\r\n" */
@@ -1137,6 +1137,13 @@ typedef struct socketFds {
     int count;
 } socketFds;
 
+typedef struct hashExpireWrapper {
+    dict *expires;      
+    void *ptr;
+} hashExpireWrapper;
+
+#define HASH_EW_GET_PTR(o) (((hashExpireWrapper *)o->ptr)->ptr)
+#define HASH_EW_GET_EXPIRES(o) (((hashExpireWrapper *)o->ptr)->expires)
 /*-----------------------------------------------------------------------------
  * TLS Context Configuration
  *----------------------------------------------------------------------------*/
@@ -1278,7 +1285,8 @@ struct redisServer {
                         *lpopCommand, *rpopCommand, *zpopminCommand,
                         *zpopmaxCommand, *sremCommand, *execCommand,
                         *expireCommand, *pexpireCommand, *xclaimCommand,
-                        *xgroupCommand, *rpoplpushCommand, *lmoveCommand;
+                        *xgroupCommand, *rpoplpushCommand, *lmoveCommand,
+                        *hdelCommand;
     /* Fields used only for stats */
     time_t stat_starttime;          /* Server start time */
     long long stat_numcommands;     /* Number of processed commands */
@@ -1768,6 +1776,7 @@ extern double R_Zero, R_PosInf, R_NegInf, R_Nan;
 extern dictType hashDictType;
 extern dictType replScriptCacheDictType;
 extern dictType dbExpiresDictType;
+extern dictType hashExpiresDictType;
 extern dictType modulesDictType;
 extern dictType sdsReplyDictType;
 extern dict *modules;
@@ -2342,6 +2351,7 @@ void initConfigValues();
 /* db.c -- Keyspace access API */
 int removeExpire(redisDb *db, robj *key);
 void propagateExpire(redisDb *db, robj *key, int lazy);
+void propagateHashExpire(redisDb *db, robj *key, robj *field);
 int expireIfNeeded(redisDb *db, robj *key);
 long long getExpire(redisDb *db, robj *key);
 void setExpire(client *c, redisDb *db, robj *key, long long when);
@@ -2635,6 +2645,7 @@ void hmgetCommand(client *c);
 void hdelCommand(client *c);
 void hlenCommand(client *c);
 void hstrlenCommand(client *c);
+void hexpireCommand(client *c);
 void zremrangebyrankCommand(client *c);
 void zunionstoreCommand(client *c);
 void zinterstoreCommand(client *c);

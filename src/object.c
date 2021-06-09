@@ -211,6 +211,13 @@ robj *dupStringObject(const robj *o) {
     }
 }
 
+void *createHashExpireWrapper(void *ptr) {
+    hashExpireWrapper *ew = zmalloc(sizeof(*ew));
+    ew->ptr = ptr;
+    ew->expires = dictCreate(&hashExpiresDictType,NULL);
+    return ew;
+}
+
 robj *createQuicklistObject(void) {
     quicklist *l = quicklistCreate();
     robj *o = createObject(OBJ_LIST,l);
@@ -241,7 +248,8 @@ robj *createIntsetObject(void) {
 
 robj *createHashObject(void) {
     unsigned char *zl = ziplistNew();
-    robj *o = createObject(OBJ_HASH, zl);
+    hashExpireWrapper *ew = createHashExpireWrapper(zl);
+    robj *o = createObject(OBJ_HASH, ew);
     o->encoding = OBJ_ENCODING_ZIPLIST;
     return o;
 }
@@ -325,9 +333,13 @@ void freeZsetObject(robj *o) {
 void freeHashObject(robj *o) {
     switch (o->encoding) {
     case OBJ_ENCODING_HT:
-        dictRelease((dict*) o->ptr);
+        dictRelease(HASH_EW_GET_PTR(o));
+        dictRelease(HASH_EW_GET_EXPIRES(o));
+        zfree(o->ptr);
         break;
     case OBJ_ENCODING_ZIPLIST:
+        zfree(HASH_EW_GET_PTR(o));
+        dictRelease(HASH_EW_GET_EXPIRES(o));
         zfree(o->ptr);
         break;
     default:
@@ -862,16 +874,21 @@ size_t objectComputeSize(robj *o, size_t sample_size) {
         }
     } else if (o->type == OBJ_HASH) {
         if (o->encoding == OBJ_ENCODING_ZIPLIST) {
-            asize = sizeof(*o)+(ziplistBlobLen(o->ptr));
+            asize = sizeof(*o)+(ziplistBlobLen(HASH_EW_GET_PTR(o)));
         } else if (o->encoding == OBJ_ENCODING_HT) {
-            d = o->ptr;
+            d = HASH_EW_GET_PTR(o); 
             di = dictGetIterator(d);
+            dict *expires = HASH_EW_GET_EXPIRES(o); 
             asize = sizeof(*o)+sizeof(dict)+(sizeof(struct dictEntry*)*dictSlots(d));
             while((de = dictNext(di)) != NULL && samples < sample_size) {
                 ele = dictGetKey(de);
                 ele2 = dictGetVal(de);
                 elesize += sdsZmallocSize(ele) + sdsZmallocSize(ele2);
                 elesize += sizeof(struct dictEntry);
+                if (dictFind(expires, ele) != NULL) {
+                    elesize += sdsZmallocSize(ele); // dup
+                    elesize += sizeof(int64_t);
+                } 
                 samples++;
             }
             dictReleaseIterator(di);

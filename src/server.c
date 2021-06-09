@@ -563,6 +563,10 @@ struct redisCommand redisCommandTable[] = {
      "write use-memory fast @hash",
      0,NULL,1,1,1,0,0,0},
 
+     {"hexpire",hexpireCommand,4,
+     "write use-memory fast @hash",
+     0,NULL,1,1,1,0,0,0},
+
     {"hsetnx",hsetnxCommand,4,
      "write use-memory fast @hash",
      0,NULL,1,1,1,0,0,0},
@@ -1449,6 +1453,17 @@ dictType dbExpiresDictType = {
     NULL,                       /* val dup */
     dictSdsKeyCompare,          /* key compare */
     NULL,                       /* key destructor */
+    NULL,                       /* val destructor */
+    dictExpandAllowed           /* allow to expand */
+};
+
+/* Hash->expires */
+dictType hashExpiresDictType = {
+    dictSdsHash,                /* hash function */
+    NULL,                       /* key dup */
+    NULL,                       /* val dup */
+    dictSdsKeyCompare,          /* key compare */
+    dictSdsDestructor,          /* key destructor */
     NULL,                       /* val destructor */
     dictExpandAllowed           /* allow to expand */
 };
@@ -2604,6 +2619,7 @@ void createSharedObjects(void) {
     shared.persist = createStringObject("PERSIST",7);
     shared.set = createStringObject("SET",3);
     shared.eval = createStringObject("EVAL",4);
+    shared.hdel = createStringObject("HDEL",6);
 
     /* Shared command argument */
     shared.left = createStringObject("left",4);
@@ -2770,6 +2786,7 @@ void initServerConfig(void) {
     server.xgroupCommand = lookupCommandByCString("xgroup");
     server.rpoplpushCommand = lookupCommandByCString("rpoplpush");
     server.lmoveCommand = lookupCommandByCString("lmove");
+    server.hdelCommand = lookupCommandByCString("hdel");
 
     /* Debugging */
     server.watchdog_period = 0;
