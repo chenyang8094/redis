@@ -1353,3 +1353,32 @@ void hexpireCommand(client *c) {
 void hpexpireCommand(client *c) {
     hashExpireGenericCommand(c,mstime(),UNIT_MILLISECONDS);
 }
+
+/* HTTL key field */
+void httlCommand(client *c) {
+    long long expire, ttl = -1;
+    robj *o;
+    /* If the key does not exist at all, return -2 */
+    if ((o = lookupKeyReadWithFlags(c->db,c->argv[1],LOOKUP_NOTOUCH)) == NULL) {
+        addReplyLongLong(c,-2);
+        return;
+    }
+
+    if (!hashTypeExists(o,c->argv[2]->ptr)) {
+        addReplyLongLong(c,-2);
+        return;
+    }
+
+    /* The key exists. Return -1 if it has no expire, or the actual
+     * TTL value otherwise. */
+    expire = getHashExpire(HASH_EW_GET_EXPIRES(o),c->argv[2]);
+    if (expire != -1) {
+        ttl = expire-mstime();
+        if (ttl < 0) ttl = 0;
+    }
+    if (ttl == -1) {
+        addReplyLongLong(c,-1);
+    } else {
+        addReplyLongLong(c,((ttl+500)/1000));
+    }
+}

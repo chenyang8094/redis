@@ -2646,6 +2646,7 @@ void hdelCommand(client *c);
 void hlenCommand(client *c);
 void hstrlenCommand(client *c);
 void hexpireCommand(client *c);
+void httlCommand(client *c);
 void zremrangebyrankCommand(client *c);
 void zunionstoreCommand(client *c);
 void zinterstoreCommand(client *c);

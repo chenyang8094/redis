@@ -894,16 +894,16 @@ ssize_t rdbSaveObject(rio *rdb, robj *o, robj *key) {
     } else if (o->type == OBJ_HASH) {
         /* Save a hash value */
         if (o->encoding == OBJ_ENCODING_ZIPLIST) {
-            size_t l = ziplistBlobLen((unsigned char*)o->ptr);
+            size_t l = ziplistBlobLen((unsigned char*)HASH_EW_GET_PTR(o));
 
-            if ((n = rdbSaveRawString(rdb,o->ptr,l)) == -1) return -1;
+            if ((n = rdbSaveRawString(rdb,HASH_EW_GET_PTR(o),l)) == -1) return -1;
             nwritten += n;
 
         } else if (o->encoding == OBJ_ENCODING_HT) {
-            dictIterator *di = dictGetIterator(o->ptr);
+            dictIterator *di = dictGetIterator(HASH_EW_GET_PTR(o));
             dictEntry *de;
 
-            if ((n = rdbSaveLen(rdb,dictSize((dict*)o->ptr))) == -1) {
+            if ((n = rdbSaveLen(rdb,dictSize((dict*)HASH_EW_GET_PTR(o)))) == -1) {
                 dictReleaseIterator(di);
                 return -1;
             }
@@ -1095,6 +1095,41 @@ int rdbSaveKeyValuePair(rio *rdb, robj *key, robj *val, long long expiretime) {
          * a single time when loading does not affect the frequency much. */
         if (rdbSaveType(rdb,RDB_OPCODE_FREQ) == -1) return -1;
         if (rdbWriteRaw(rdb,buf,1) == -1) return -1;
+    }
+
+    if (val->type == OBJ_HASH ) {
+        dict * hexpire = HASH_EW_GET_EXPIRES(val);
+        dictIterator *di = dictGetIterator(hexpire);
+        dictEntry *de;
+        ssize_t n = 0;
+
+        if (dictSize(hexpire)) {
+            if (rdbSaveType(rdb,RDB_OPCODE_SUBKEY_EXPIRETIME_MS) == -1) return -1;
+
+            if ((n = rdbSaveLen(rdb,dictSize(hexpire))) == -1) {
+                dictReleaseIterator(di);
+                return -1;
+            }
+    
+            while((de = dictNext(di)) != NULL) {
+                sds field = dictGetKey(de);
+                int64_t expire = dictGetSignedIntegerVal(de);
+
+                if ((n = rdbSaveRawString(rdb,(unsigned char*)field,sdslen(field))) == -1)
+                {
+                    dictReleaseIterator(di);
+                    return -1;
+                }
+    
+                if ((n = rdbSaveLen(rdb,expire)) == -1)
+                {
+                    dictReleaseIterator(di);
+                    return -1;
+                }
+            }
+
+            dictReleaseIterator(di);
+        }
     }
 
     /* Save type, key, value */
@@ -1723,9 +1758,9 @@ robj *rdbLoadObject(int rdbtype, rio *rdb, sds key) {
             }
 
             /* Add pair to ziplist */
-            o->ptr = ziplistPush(o->ptr, (unsigned char*)field,
+            HASH_EW_GET_PTR(o) = ziplistPush( HASH_EW_GET_PTR(o), (unsigned char*)field,
                     sdslen(field), ZIPLIST_TAIL);
-            o->ptr = ziplistPush(o->ptr, (unsigned char*)value,
+             HASH_EW_GET_PTR(o) = ziplistPush( HASH_EW_GET_PTR(o), (unsigned char*)value,
                     sdslen(value), ZIPLIST_TAIL);
 
             /* Convert to hash table if size threshold is exceeded */
@@ -1749,7 +1784,7 @@ robj *rdbLoadObject(int rdbtype, rio *rdb, sds key) {
         }
 
         if (o->encoding == OBJ_ENCODING_HT && len > DICT_HT_INITIAL_SIZE) {
-            if (dictTryExpand(o->ptr,len) != DICT_OK) {
+            if (dictTryExpand( HASH_EW_GET_PTR(o),len) != DICT_OK) {
                 rdbReportCorruptRDB("OOM in dictTryExpand %llu", (unsigned long long)len);
                 decrRefCount(o);
                 return NULL;
@@ -1771,7 +1806,7 @@ robj *rdbLoadObject(int rdbtype, rio *rdb, sds key) {
             }
 
             /* Add pair to hash table */
-            ret = dictAdd((dict*)o->ptr, field, value);
+            ret = dictAdd((dict*)HASH_EW_GET_PTR(o), field, value);
             if (ret == DICT_ERR) {
                 rdbReportCorruptRDB("Duplicate hash fields detected");
                 sdsfree(value);
@@ -1840,7 +1875,7 @@ robj *rdbLoadObject(int rdbtype, rio *rdb, sds key) {
                  * when loading dumps created by Redis 2.4 gets deprecated. */
                 {
                     unsigned char *zl = ziplistNew();
-                    unsigned char *zi = zipmapRewind(o->ptr);
+                    unsigned char *zi = zipmapRewind(HASH_EW_GET_PTR(o));
                     unsigned char *fstr, *vstr;
                     unsigned int flen, vlen;
                     unsigned int maxlen = 0;
@@ -1859,15 +1894,15 @@ robj *rdbLoadObject(int rdbtype, rio *rdb, sds key) {
                             dictRelease(dupSearchDict);
                             sdsfree(field);
                             zfree(encoded);
-                            o->ptr = NULL;
+                            HASH_EW_GET_PTR(o) = NULL;
                             decrRefCount(o);
                             return NULL;
                         }
                     }
 
                     dictRelease(dupSearchDict);
-                    zfree(o->ptr);
-                    o->ptr = zl;
+                    zfree(HASH_EW_GET_PTR(o));
+                    HASH_EW_GET_PTR(o) = zl;
                     o->type = OBJ_HASH;
                     o->encoding = OBJ_ENCODING_ZIPLIST;
 
@@ -1930,6 +1965,10 @@ robj *rdbLoadObject(int rdbtype, rio *rdb, sds key) {
                 }
                 o->type = OBJ_HASH;
                 o->encoding = OBJ_ENCODING_ZIPLIST;
+                hashExpireWrapper *ew = zmalloc(sizeof(*ew));
+                ew->ptr = o->ptr;
+                ew->expires = dictCreate(&hashExpiresDictType,NULL);
+                o->ptr = ew;
                 if (hashTypeLength(o) > server.hash_max_ziplist_entries)
                     hashTypeConvert(o, OBJ_ENCODING_HT);
                 break;
@@ -2347,6 +2386,7 @@ int rdbLoadRio(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
     /* Key-specific attributes, set by opcodes before the key type. */
     long long lru_idle = -1, lfu_freq = -1, expiretime = -1, now = mstime();
     long long lru_clock = LRU_CLOCK();
+    dict *hash_expires = NULL;
 
     while(1) {
         sds key;
@@ -2520,6 +2560,35 @@ int rdbLoadRio(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
                 decrRefCount(aux);
                 continue; /* Read next opcode. */
             }
+        } else if (type == RDB_OPCODE_SUBKEY_EXPIRETIME_MS) {
+            uint64_t len;
+            sds field;
+            uint64_t expire;
+
+            len = rdbLoadLen(rdb, NULL);
+            if (len == RDB_LENERR) return -1;
+
+            if (len == 0) continue;
+
+            hash_expires = dictCreate(&hashExpiresDictType,NULL);
+            dictExpand(hash_expires,len);
+            while (len--) {
+                if ((field = rdbGenericLoadStringObject(rdb,RDB_LOAD_SDS,NULL)) == NULL) {
+                    return -1;
+                }
+                if ((expire = rdbLoadLen(rdb,NULL)) == RDB_LENERR) {
+                    sdsfree(field);
+                    return -1;
+                }
+
+                dictEntry *de = dictAddOrFind(hash_expires,field);
+                if (de == NULL) {
+                    sdsfree(field);
+                    return -1;
+                }
+                dictSetSignedIntegerVal(de,expire);
+            }
+            continue; /* Read next opcode. */
         }
 
         /* Read key */
@@ -2529,6 +2598,11 @@ int rdbLoadRio(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
         if ((val = rdbLoadObject(type,rdb,key)) == NULL) {
             sdsfree(key);
             goto eoferr;
+        }
+
+        if (val->type == OBJ_HASH && hash_expires) {
+            dictRelease(HASH_EW_GET_EXPIRES(val));
+            HASH_EW_GET_EXPIRES(val) = hash_expires;
         }
 
         /* Check if the key already expired. This function is used when loading
@@ -2587,6 +2661,7 @@ int rdbLoadRio(rio *rdb, int rdbflags, rdbSaveInfo *rsi) {
         expiretime = -1;
         lfu_freq = -1;
         lru_idle = -1;
+        hash_expires = NULL;
     }
     /* Verify the checksum if RDB version is >= 5 */
     if (rdbver >= 5) {

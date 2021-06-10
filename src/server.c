@@ -564,6 +564,10 @@ struct redisCommand redisCommandTable[] = {
      0,NULL,1,1,1,0,0,0},
 
      {"hexpire",hexpireCommand,4,
+     "read-only fast @hash",
+     0,NULL,1,1,1,0,0,0},
+
+    {"httl",httlCommand,3,
      "write use-memory fast @hash",
      0,NULL,1,1,1,0,0,0},
 
