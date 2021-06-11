@@ -212,7 +212,7 @@ robj *dupStringObject(const robj *o) {
 }
 
 void *createHashExpireWrapper(void *ptr) {
-    hashExpireWrapper *ew = zmalloc(sizeof(*ew));
+    expireWrapper *ew = zmalloc(sizeof(*ew));
     ew->ptr = ptr;
     ew->expires = dictCreate(&hashExpiresDictType,NULL);
     return ew;
@@ -248,7 +248,7 @@ robj *createIntsetObject(void) {
 
 robj *createHashObject(void) {
     unsigned char *zl = ziplistNew();
-    hashExpireWrapper *ew = createHashExpireWrapper(zl);
+    expireWrapper *ew = createHashExpireWrapper(zl);
     robj *o = createObject(OBJ_HASH, ew);
     o->encoding = OBJ_ENCODING_ZIPLIST;
     return o;
@@ -333,13 +333,13 @@ void freeZsetObject(robj *o) {
 void freeHashObject(robj *o) {
     switch (o->encoding) {
     case OBJ_ENCODING_HT:
-        dictRelease(HASH_EW_GET_PTR(o));
-        dictRelease(HASH_EW_GET_EXPIRES(o));
+        dictRelease(EW_PTR(o->ptr));
+        dictRelease(EW_EXPIRES(o->ptr));
         zfree(o->ptr);
         break;
     case OBJ_ENCODING_ZIPLIST:
-        zfree(HASH_EW_GET_PTR(o));
-        dictRelease(HASH_EW_GET_EXPIRES(o));
+        zfree(EW_PTR(o->ptr));
+        dictRelease(EW_EXPIRES(o->ptr));
         zfree(o->ptr);
         break;
     default:
@@ -874,11 +874,11 @@ size_t objectComputeSize(robj *o, size_t sample_size) {
         }
     } else if (o->type == OBJ_HASH) {
         if (o->encoding == OBJ_ENCODING_ZIPLIST) {
-            asize = sizeof(*o)+(ziplistBlobLen(HASH_EW_GET_PTR(o)));
+            asize = sizeof(*o)+(ziplistBlobLen(EW_PTR(o->ptr)));
         } else if (o->encoding == OBJ_ENCODING_HT) {
-            d = HASH_EW_GET_PTR(o); 
+            d = EW_PTR(o->ptr); 
             di = dictGetIterator(d);
-            dict *expires = HASH_EW_GET_EXPIRES(o); 
+            dict *expires = EW_EXPIRES(o->ptr); 
             asize = sizeof(*o)+sizeof(dict)+(sizeof(struct dictEntry*)*dictSlots(d));
             while((de = dictNext(di)) != NULL && samples < sample_size) {
                 ele = dictGetKey(de);

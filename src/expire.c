@@ -313,6 +313,27 @@ void activeExpireCycle(int type) {
              * not reclaimed). */
         } while (sampled == 0 ||
                  (expired*100/sampled) > config_cycle_acceptable_stale);
+
+                     /* Try to find exhash keys and expired them */
+        {
+            int num = 20;
+            long long now = mstime();
+            while (num--) {
+                dictEntry *de;
+                if ((de = dictGetRandomKey(db->dict)) == NULL) break;
+                robj *o = dictGetVal(de);
+                if (o->type == OBJ_HASH) {
+                    dictEntry *expire_de = dictFind(db->expires, dictGetKey(de));
+                    if (NULL != expire_de && dictGetSignedIntegerVal(expire_de) < now) {
+                        if (activeExpireCycleTryExpire(db, de, now)) {
+                            break;
+                        }
+                    }
+                    /* check fields expiration if the exhash itself not expired */
+                    activeExpireCycleTryExpireHash(db, de, now);
+                }
+            }
+        }
     }
 
     elapsed = ustime()-start;

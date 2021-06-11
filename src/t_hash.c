@@ -64,7 +64,7 @@ int hashTypeGetFromZiplist(robj *o, sds field,
 
     serverAssert(o->encoding == OBJ_ENCODING_ZIPLIST);
 
-    zl = HASH_EW_GET_PTR(o);
+    zl = EW_PTR(o->ptr);
     fptr = ziplistIndex(zl, ZIPLIST_HEAD);
     if (fptr != NULL) {
         fptr = ziplistFind(zl, fptr, (unsigned char*)field, sdslen(field), 1);
@@ -92,7 +92,7 @@ sds hashTypeGetFromHashTable(robj *o, sds field) {
 
     serverAssert(o->encoding == OBJ_ENCODING_HT);
 
-    de = dictFind(HASH_EW_GET_PTR(o), field);
+    de = dictFind(EW_PTR(o->ptr), field);
     if (de == NULL) return NULL;
     return dictGetVal(de);
 }
@@ -205,7 +205,7 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
     if (o->encoding == OBJ_ENCODING_ZIPLIST) {
         unsigned char *zl, *fptr, *vptr;
 
-        zl = HASH_EW_GET_PTR(o);
+        zl = EW_PTR(o->ptr);
         fptr = ziplistIndex(zl, ZIPLIST_HEAD);
         if (fptr != NULL) {
             fptr = ziplistFind(zl, fptr, (unsigned char*)field, sdslen(field), 1);
@@ -228,13 +228,13 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
             zl = ziplistPush(zl, (unsigned char*)value, sdslen(value),
                     ZIPLIST_TAIL);
         }
-        HASH_EW_GET_PTR(o) = zl;
+        EW_PTR(o->ptr) = zl;
 
         /* Check if the ziplist needs to be converted to a hash table */
         if (hashTypeLength(o) > server.hash_max_ziplist_entries)
             hashTypeConvert(o, OBJ_ENCODING_HT);
     } else if (o->encoding == OBJ_ENCODING_HT) {
-        dictEntry *de = dictFind(HASH_EW_GET_PTR(o),field);
+        dictEntry *de = dictFind(EW_PTR(o->ptr),field);
         if (de) {
             sdsfree(dictGetVal(de));
             if (flags & HASH_SET_TAKE_VALUE) {
@@ -258,7 +258,7 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
             } else {
                 v = sdsdup(value);
             }
-            dictAdd(HASH_EW_GET_PTR(o),f,v);
+            dictAdd(EW_PTR(o->ptr),f,v);
         }
     } else {
         serverPanic("Unknown hash encoding");
@@ -279,23 +279,23 @@ int hashTypeDelete(robj *o, sds field) {
     if (o->encoding == OBJ_ENCODING_ZIPLIST) {
         unsigned char *zl, *fptr;
 
-        zl = HASH_EW_GET_PTR(o);
+        zl = EW_PTR(o->ptr);
         fptr = ziplistIndex(zl, ZIPLIST_HEAD);
         if (fptr != NULL) {
             fptr = ziplistFind(zl, fptr, (unsigned char*)field, sdslen(field), 1);
             if (fptr != NULL) {
                 zl = ziplistDelete(zl,&fptr); /* Delete the key. */
                 zl = ziplistDelete(zl,&fptr); /* Delete the value. */
-                HASH_EW_GET_PTR(o) = zl;
+                EW_PTR(o->ptr) = zl;
                 deleted = 1;
             }
         }
     } else if (o->encoding == OBJ_ENCODING_HT) {
-        if (dictDelete((dict*)HASH_EW_GET_PTR(o), field) == C_OK) {
+        if (dictDelete((dict*)EW_PTR(o->ptr), field) == C_OK) {
             deleted = 1;
 
             /* Always check if the dictionary needs a resize after a delete. */
-            if (htNeedsResize(HASH_EW_GET_PTR(o))) dictResize(HASH_EW_GET_PTR(o));
+            if (htNeedsResize(EW_PTR(o->ptr))) dictResize(EW_PTR(o->ptr));
         }
 
     } else {
@@ -309,9 +309,9 @@ unsigned long hashTypeLength(const robj *o) {
     unsigned long length = ULONG_MAX;
 
     if (o->encoding == OBJ_ENCODING_ZIPLIST) {
-        length = ziplistLen(HASH_EW_GET_PTR(o)) / 2;
+        length = ziplistLen(EW_PTR(o->ptr)) / 2;
     } else if (o->encoding == OBJ_ENCODING_HT) {
-        length = dictSize((const dict*)HASH_EW_GET_PTR(o));
+        length = dictSize((const dict*)EW_PTR(o->ptr));
     } else {
         serverPanic("Unknown hash encoding");
     }
@@ -327,7 +327,7 @@ hashTypeIterator *hashTypeInitIterator(robj *subject) {
         hi->fptr = NULL;
         hi->vptr = NULL;
     } else if (hi->encoding == OBJ_ENCODING_HT) {
-        hi->di = dictGetIterator(subject->ptr);
+        hi->di = dictGetIterator(EW_PTR(subject->ptr));
     } else {
         serverPanic("Unknown hash encoding");
     }
@@ -347,7 +347,7 @@ int hashTypeNext(hashTypeIterator *hi) {
         unsigned char *zl;
         unsigned char *fptr, *vptr;
 
-        zl = hi->subject->ptr;
+        zl = EW_PTR(hi->subject->ptr);
         fptr = hi->fptr;
         vptr = hi->vptr;
 
@@ -478,14 +478,14 @@ void hashTypeConvertZiplist(robj *o, int enc) {
             ret = dictAdd(dict, key, value);
             if (ret != DICT_OK) {
                 serverLogHexDump(LL_WARNING,"ziplist with dup elements dump",
-                    HASH_EW_GET_PTR(o),ziplistBlobLen(HASH_EW_GET_PTR(o)));
+                    EW_PTR(o->ptr),ziplistBlobLen(EW_PTR(o->ptr)));
                 serverPanic("Ziplist corruption detected");
             }
         }
         hashTypeReleaseIterator(hi);
-        zfree(HASH_EW_GET_PTR(o));
+        zfree(EW_PTR(o->ptr));
         o->encoding = OBJ_ENCODING_HT;
-        HASH_EW_GET_PTR(o) = dict;
+        EW_PTR(o->ptr) = dict;
     } else {
         serverPanic("Unknown hash encoding");
     }
@@ -513,7 +513,7 @@ robj *hashTypeDup(robj *o) {
     serverAssert(o->type == OBJ_HASH);
 
     if(o->encoding == OBJ_ENCODING_ZIPLIST){
-        unsigned char *zl = HASH_EW_GET_PTR(o);
+        unsigned char *zl = EW_PTR(o->ptr);
         size_t sz = ziplistBlobLen(zl);
         unsigned char *new_zl = zmalloc(sz);
         memcpy(new_zl, zl, sz);
@@ -521,7 +521,7 @@ robj *hashTypeDup(robj *o) {
         hobj->encoding = OBJ_ENCODING_ZIPLIST;
     } else if(o->encoding == OBJ_ENCODING_HT){
         dict *d = dictCreate(&hashDictType, NULL);
-        dictExpand(d, dictSize((const dict*)HASH_EW_GET_PTR(o)));
+        dictExpand(d, dictSize((const dict*)EW_PTR(o->ptr)));
 
         hi = hashTypeInitIterator(o);
         while (hashTypeNext(hi) != C_ERR) {
@@ -614,7 +614,7 @@ void hashReplyFromZiplistEntry(client *c, ziplistEntry *e) {
  * 'val' can be NULL in which case it's not extracted. */
 void hashTypeRandomElement(robj *hashobj, unsigned long hashsize, ziplistEntry *key, ziplistEntry *val) {
     if (hashobj->encoding == OBJ_ENCODING_HT) {
-        dictEntry *de = dictGetFairRandomKey(hashobj->ptr);
+        dictEntry *de = dictGetFairRandomKey(EW_PTR(hashobj->ptr));
         sds s = dictGetKey(de);
         key->sval = (unsigned char*)s;
         key->slen = sdslen(s);
@@ -624,7 +624,7 @@ void hashTypeRandomElement(robj *hashobj, unsigned long hashsize, ziplistEntry *
             val->slen = sdslen(s);
         }
     } else if (hashobj->encoding == OBJ_ENCODING_ZIPLIST) {
-        ziplistRandomPair(hashobj->ptr, hashsize, key, val);
+        ziplistRandomPair(EW_PTR(hashobj->ptr), hashsize, key, val);
     } else {
         serverPanic("Unknown hash encoding");
     }
@@ -849,7 +849,7 @@ int fieldIsExpired(dict *expires, robj *field) {
 }
 
 int expireHashIfNeeded(redisDb *db, robj *o, robj *key, robj *field) {
-    if (!fieldIsExpired(HASH_EW_GET_EXPIRES(o),field)) return 0;
+    if (!fieldIsExpired(EW_EXPIRES(o->ptr),field)) return 0;
 
     /* If we are running in the context of a slave, instead of
      * evicting the expired field from the hash, we return ASAP:
@@ -1108,7 +1108,7 @@ void hrandfieldWithCountCommand(client *c, long l, int withvalues) {
         if (hash->encoding == OBJ_ENCODING_HT) {
             sds key, value;
             while (count--) {
-                dictEntry *de = dictGetFairRandomKey(hash->ptr);
+                dictEntry *de = dictGetFairRandomKey(EW_PTR(hash->ptr));
                 key = dictGetKey(de);
                 value = dictGetVal(de);
                 if (withvalues && c->resp > 2)
@@ -1127,7 +1127,7 @@ void hrandfieldWithCountCommand(client *c, long l, int withvalues) {
             while (count) {
                 sample_count = count > limit ? limit : count;
                 count -= sample_count;
-                ziplistRandomPairs(hash->ptr, sample_count, keys, vals);
+                ziplistRandomPairs(EW_PTR(hash->ptr), sample_count, keys, vals);
                 harndfieldReplyWithZiplist(c, sample_count, keys, vals);
             }
             zfree(keys);
@@ -1229,7 +1229,7 @@ void hrandfieldWithCountCommand(client *c, long l, int withvalues) {
             keys = zmalloc(sizeof(ziplistEntry)*count);
             if (withvalues)
                 vals = zmalloc(sizeof(ziplistEntry)*count);
-            serverAssert(ziplistRandomPairsUnique(hash->ptr, count, keys, vals) == count);
+            serverAssert(ziplistRandomPairsUnique(EW_PTR(hash->ptr), count, keys, vals) == count);
             harndfieldReplyWithZiplist(c, count, keys, vals);
             zfree(keys);
             zfree(vals);
@@ -1332,10 +1332,10 @@ static void hashExpireGenericCommand(client *c, long long basetime, int unit) {
 
         server.dirty++;
     } else {
-        dictEntry *de = dictFind(HASH_EW_GET_EXPIRES(o),c->argv[2]->ptr);
+        dictEntry *de = dictFind(EW_EXPIRES(o->ptr),c->argv[2]->ptr);
         if (de == NULL) {
             /* Because of the ziplist encoding, it is not possible to share fields with the hash structure here. */
-            de = dictAddOrFind(HASH_EW_GET_EXPIRES(o),sdsdup(c->argv[2]->ptr));
+            de = dictAddOrFind(EW_EXPIRES(o->ptr),sdsdup(c->argv[2]->ptr));
         }  
         dictSetSignedIntegerVal(de,when);
         server.dirty++;
@@ -1371,7 +1371,7 @@ void httlCommand(client *c) {
 
     /* The key exists. Return -1 if it has no expire, or the actual
      * TTL value otherwise. */
-    expire = getHashExpire(HASH_EW_GET_EXPIRES(o),c->argv[2]);
+    expire = getHashExpire(EW_EXPIRES(o->ptr),c->argv[2]);
     if (expire != -1) {
         ttl = expire-mstime();
         if (ttl < 0) ttl = 0;
@@ -1381,4 +1381,40 @@ void httlCommand(client *c) {
     } else {
         addReplyLongLong(c,((ttl+500)/1000));
     }
+}
+
+
+#define ACTIVE_EXPIRE_CYCLE_HASH_MAX_FIELDS 1000
+/* this functions will only be invoked by master
+ * so we don't check server.masterhost here */
+int activeExpireCycleTryExpireHash(redisDb *db, dictEntry *de, long long now) {
+    sds key = dictGetKey(de);
+    robj *keyobj = createStringObject(key,sdslen(key));
+    robj *o = dictGetVal(de);
+    int num = hashTypeLength(o), expired = 0;
+
+    if (num > ACTIVE_EXPIRE_CYCLE_HASH_MAX_FIELDS)
+        num = ACTIVE_EXPIRE_CYCLE_HASH_MAX_FIELDS;
+
+    long long when;
+    dictEntry *field_de;
+    while (num--) {
+        if ((field_de = dictGetRandomKey((dict*)EW_EXPIRES(o->ptr))) == NULL) break;
+        when = dictGetSignedIntegerVal(field_de);
+        
+        if (when < now) {
+            sds field = dictGetKey(field_de);
+            propagateHashExpire(db,keyobj,field);
+            dictDelete((dict*)EW_PTR(o->ptr), field);
+            expired++;
+        }
+    }
+
+    if (0 == hashTypeLength(o)) {
+        dbDelete(db,keyobj);
+        propagateExpire(db, keyobj, 0);
+    }  
+
+    decrRefCount(keyobj);
+    return expired;
 }

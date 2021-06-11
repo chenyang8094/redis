@@ -1137,13 +1137,13 @@ typedef struct socketFds {
     int count;
 } socketFds;
 
-typedef struct hashExpireWrapper {
+typedef struct expireWrapper {
     dict *expires;      
     void *ptr;
-} hashExpireWrapper;
+} expireWrapper;
 
-#define HASH_EW_GET_PTR(o) (((hashExpireWrapper *)o->ptr)->ptr)
-#define HASH_EW_GET_EXPIRES(o) (((hashExpireWrapper *)o->ptr)->expires)
+#define EW_PTR(ew) (((expireWrapper *)ew)->ptr)
+#define EW_EXPIRES(ew) (((expireWrapper *)ew)->expires)
 /*-----------------------------------------------------------------------------
  * TLS Context Configuration
  *----------------------------------------------------------------------------*/
@@ -2485,6 +2485,7 @@ void expireSlaveKeys(void);
 void rememberSlaveKeyWithExpire(redisDb *db, robj *key);
 void flushSlaveKeysWithExpireList(void);
 size_t getSlaveKeyWithExpireCount(void);
+int activeExpireCycleTryExpireHash(redisDb *db, dictEntry *de, long long now);
 
 /* evict.c -- maxmemory handling and LRU eviction. */
 void evictionPoolAlloc(void);
