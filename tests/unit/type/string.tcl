@@ -598,4 +598,41 @@ start_server {tags {"string"}} {
     test {LCS indexes with match len and minimum match len} {
         dict get [r LCS virus1{t} virus2{t} IDX WITHMATCHLEN MINMATCHLEN 5] matches
     } {{{1 222} {13 234} 222}}
+
+    test {CAS and CAD} {
+        r del foo
+
+        assert_equal -1 [r CAS foo v1 v2]
+        r set foo v1
+        assert_equal 1 [r CAS foo v1 v2]
+        assert_equal 0 [r CAS foo v1 v3]
+
+        assert_equal 0 [r CAD foo v1]
+        assert_equal 1 [r CAD foo v2]
+        assert_equal -1 [r CAD foo v2]
+    }
+
+    test {CAS propagate as SET command to replica} {
+        set repl [attach_to_replication_stream]
+        r set foo v1
+        assert_equal 1 [r CAS foo v1 v2]
+        assert_replication_stream $repl {
+            {select *}
+            {set foo v1}
+            {set foo v2 KEEPTTL}
+        }
+        close_replication_stream $repl
+    } {} {needs:repl}
+
+    test {CAD propagate as DEL command to replica} {
+        set repl [attach_to_replication_stream]
+        r set foo v1
+        assert_equal 1 [r CAD foo v1]
+        assert_replication_stream $repl {
+            {select *}
+            {set foo v1}
+            {del foo}
+        }
+        close_replication_stream $repl
+    } {} {needs:repl}
 }

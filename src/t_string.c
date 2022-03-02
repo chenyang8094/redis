@@ -941,3 +941,63 @@ cleanup:
     return;
 }
 
+/* CAS key oldvalue newvalue */
+void casCommand(client *c) {
+    robj *o, *oldvalue, *newvalue;
+
+    o = lookupKeyWrite(c->db, c->argv[1]);
+    if (o == NULL) {
+       addReplyLongLong(c, -1);
+       return;
+    } else {
+        /* Key exists, check type */
+        if (checkType(c, o, OBJ_STRING))
+            return;
+
+        oldvalue = c->argv[2];
+        if (compareStringObjects(o, oldvalue)) {
+            addReplyLongLong(c, 0);
+            return;
+        }
+
+        newvalue = c->argv[3];
+        /* Update the value */
+        incrRefCount(newvalue);
+        dbOverwrite(c->db, c->argv[1], newvalue);
+    }
+    signalModifiedKey(c, c->db, c->argv[1]);
+    notifyKeyspaceEvent(NOTIFY_STRING, "cas", c->argv[1], c->db->id);
+    server.dirty++;
+    rewriteClientCommandVector(c, 4, shared.set, c->argv[1], newvalue, shared.keepttl);
+    addReplyLongLong(c, 1);
+}
+
+/* CAD key curvalue */
+void cadCommand(client *c) {
+    robj *o, *curvalue;
+
+    o = lookupKeyWrite(c->db, c->argv[1]);
+    if (o == NULL) {
+       addReplyLongLong(c, -1);
+       return;
+    } else {
+        /* Key exists, check type */
+        if (checkType(c, o, OBJ_STRING))
+            return;
+
+        curvalue = c->argv[2];
+        if (compareStringObjects(o, curvalue)) {
+            addReplyLongLong(c, 0);
+            return;
+        }
+
+        int deleted = server.lazyfree_lazy_user_del ? dbAsyncDelete(c->db, c->argv[1]) :
+            dbSyncDelete(c->db, c->argv[1]);
+        serverAssert(deleted);        
+    }
+    signalModifiedKey(c, c->db, c->argv[1]);
+    notifyKeyspaceEvent(NOTIFY_STRING, "cad", c->argv[1], c->db->id);
+    server.dirty++;
+    rewriteClientCommandVector(c, 2, shared.del, c->argv[1]);
+    addReplyLongLong(c, 1);
+}
