@@ -1206,6 +1206,12 @@ REDISMODULE_API int (*RedisModule_RegisterNumericConfig)(RedisModuleCtx *ctx, co
 REDISMODULE_API int (*RedisModule_RegisterStringConfig)(RedisModuleCtx *ctx, const char *name, const char *default_val, unsigned int flags, RedisModuleConfigGetStringFunc getfn, RedisModuleConfigSetStringFunc setfn, RedisModuleConfigApplyFunc applyfn, void *privdata) REDISMODULE_ATTR;
 REDISMODULE_API int (*RedisModule_RegisterEnumConfig)(RedisModuleCtx *ctx, const char *name, int default_val, unsigned int flags, const char **enum_values, const int *int_values, int num_enum_vals, RedisModuleConfigGetEnumFunc getfn, RedisModuleConfigSetEnumFunc setfn, RedisModuleConfigApplyFunc applyfn, void *privdata) REDISMODULE_ATTR;
 REDISMODULE_API int (*RedisModule_LoadConfigs)(RedisModuleCtx *ctx) REDISMODULE_ATTR;
+REDISMODULE_API int (*RedisModule_SetBlockClientPrivateData)(RedisModuleBlockedClient *bc, void *data);
+REDISMODULE_API int (*RedisModule_InitMIOThreadLocal)(void);
+REDISMODULE_API int (*RedisModule_CheckClientWritePaused)(void);
+REDISMODULE_API int (*RedisModule_GetPermission)(RedisModuleCtx *ctx);
+REDISMODULE_API void (*RedisModule_BigKeyListUpdateEntry)(RedisModuleKey *key);
+REDISMODULE_API int (*RedisModule_CheckKeyPaused)(RedisModuleString *key);
 
 #define RedisModule_IsAOFClient(id) ((id) == UINT64_MAX)
 
@@ -1546,6 +1552,12 @@ static int RedisModule_Init(RedisModuleCtx *ctx, const char *name, int ver, int 
     REDISMODULE_GET_API(RegisterStringConfig);
     REDISMODULE_GET_API(RegisterEnumConfig);
     REDISMODULE_GET_API(LoadConfigs);
+    REDISMODULE_GET_API(SetBlockClientPrivateData);
+    REDISMODULE_GET_API(InitMIOThreadLocal);
+    REDISMODULE_GET_API(CheckClientWritePaused);
+    REDISMODULE_GET_API(GetPermission);
+    REDISMODULE_GET_API(CheckKeyPaused);
+    REDISMODULE_GET_API(BigKeyListUpdateEntry);
 
     if (RedisModule_IsModuleNameBusy && RedisModule_IsModuleNameBusy(name)) return REDISMODULE_ERR;
     RedisModule_SetModuleAttribs(ctx,name,ver,apiver);

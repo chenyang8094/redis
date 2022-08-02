@@ -12400,6 +12400,35 @@ int RM_GetDbIdFromDefragCtx(RedisModuleDefragCtx *ctx) {
     return ctx->dbid;
 }
 
+
+int RM_CheckClientWritePaused(void) {
+   return 0;
+}
+
+/* Set Block Client private data for callback */
+int RM_SetBlockClientPrivateData(RedisModuleBlockedClient *bc, void *data) {
+    bc->privdata = data; 
+    return 1;
+}
+
+int RM_InitMIOThreadLocal(void) {
+    return 0;
+}
+
+void RM_BigKeyListUpdateEntry(RedisModuleKey *key) {
+    UNUSED(key);
+}
+
+int RM_GetPermission(RedisModuleCtx *ctx) {
+    UNUSED(ctx);
+    return 0;
+}
+
+int RM_CheckKeyPaused(RedisModuleString *key) {
+    UNUSED(key);
+   return 0;
+}
+
 /* Register all the APIs we export. Keep this function at the end of the
  * file so that's easy to seek it to add new entries. */
 void moduleRegisterCoreAPI(void) {
@@ -12736,4 +12765,10 @@ void moduleRegisterCoreAPI(void) {
     REGISTER_API(RegisterStringConfig);
     REGISTER_API(RegisterEnumConfig);
     REGISTER_API(LoadConfigs);
+    REGISTER_API(SetBlockClientPrivateData); 
+    REGISTER_API(InitMIOThreadLocal); 
+    REGISTER_API(CheckClientWritePaused); 
+    REGISTER_API(BigKeyListUpdateEntry);
+    REGISTER_API(GetPermission);
+    REGISTER_API(CheckKeyPaused);
 }
